@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+import pdb
 
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 torchType = torch.float32
@@ -12,31 +13,29 @@ class Dense(nn.Module):
     def __init__(self, in_, out_, scope='dense', factor=1.0):
         super(Dense, self).__init__()
         self.fc = nn.Linear(in_, out_)
-        weights = lambda tensor: self.init_weights(tensor, factor)
-        self.fc.apply(weights).to(device)
-
-    def init_weights(self, tensor, factor):
-        if isinstance(tensor, nn.Linear):
-            tensor.bias.data.fill_(torch.tensor(0., dtype=torchType))
-            nn.init.kaiming_normal_(tensor.weight.data, mode='fan_in', a=factor * 2)
+        self.fc.bias = nn.Parameter(torch.zeros(out_, dtype=torchType))
+        self.fc.weight = nn.Parameter(0.0001 * torch.ones((out_, in_), dtype=torchType))
 
     def forward(self, x):
-        # print('x.shape in Dense', x.shape)
         return self.fc(x)
 
 
 class Parallel(nn.Module):
     """Parallel module"""
 
-    def __init__(self, layers=[]):
+    def __init__(self, x_dim, factor):
         super(Parallel, self).__init__()
-        self.layers = layers
+        self.seq1 = nn.Sequential(
+            Dense(10, x_dim, scope='linear_s', factor=0.001),
+            ScaleTanh(x_dim, scope='scale_s'))
+        self.fc_par_1 = Dense(10, x_dim, scope='linear_t', factor=0.001)
 
-    def add(self, layer):
-        self.layers.append(layer)
+        self.seq2 = nn.Sequential(
+            Dense(10, x_dim, scope='linear_f', factor=0.001),
+            ScaleTanh(x_dim, scope='scale_f'))
 
     def forward(self, x):
-        return [layer(x) for layer in self.layers]
+        return [self.seq1(x), self.fc_par_1(x), self.seq2(x)]
 
 
 class ScaleTanh(nn.Module):
@@ -44,49 +43,34 @@ class ScaleTanh(nn.Module):
 
     def __init__(self, in_, scope='scaled_tanh'):
         super(ScaleTanh, self).__init__()
-        self.scale = torch.exp(torch.zeros(in_, dtype=torchType).to(device))
+        self.param = nn.Parameter(torch.zeros(in_, dtype=torchType))
         self.tanh = nn.Tanh()
 
     def forward(self, x):
-        return self.scale * self.tanh(x)
+        scale = torch.exp(self.param)
+        return scale * self.tanh(x)
 
 
 class Zip(nn.Module):
     """Zip module"""
-
-    def __init__(self, layers=[]):
+    def __init__(self, x_dim, factor):
         super(Zip, self).__init__()
-        self.layers = layers
+        self.fc_zip_1 = Dense(x_dim, 10, scope='embed_1', factor=1.0 / 3)
+        self.fc_zip_2 = Dense(x_dim, 10, scope='embed_2', factor=factor * 1.0 / 3)
+        self.fc_zip_3 = Dense(2, 10, scope='embed_3', factor=1.0 / 3)
 
     def forward(self, x):
-        assert len(x) == len(self.layers)
-        n = len(self.layers)
-        return [self.layers[i](x[i]) for i in range(n)]
+        assert len(x) == 3
+        return [self.fc_zip_1(x[0]), self.fc_zip_2(x[1]), self.fc_zip_3(x[2])]
 
-
-class Net(nn.Module):
+class Net_old(nn.Module):
     """Multilayer perceptron"""
-
     def __init__(self, x_dim, factor, scope=None):
-        super(Net, self).__init__()
-
-        self.embed = nn.Sequential(Zip([
-            Dense(x_dim, 10, scope='embed_1', factor=1.0 / 3),
-            Dense(x_dim, 10, scope='embed_2', factor=factor * 1.0 / 3),
-            Dense(2, 10, scope='embed_3', factor=1.0 / 3)
-        ]))
-
+        super(Net_old, self).__init__()
+        self.embed = Zip(x_dim, factor)
         self.fc1 = Dense(10, 10, scope='linear_1')
-
-        self.fc2 = Parallel([
-            nn.Sequential(
-                Dense(10, x_dim, scope='linear_s', factor=0.001),
-                ScaleTanh(x_dim, scope='scale_s')),
-            Dense(10, x_dim, scope='linear_t', factor=0.001),
-            nn.Sequential(
-                Dense(10, x_dim, scope='linear_f', factor=0.001),
-                ScaleTanh(x_dim, scope='scale_f'))
-        ])
+        self.fc2 = Parallel(x_dim, factor)
+        # pdb.set_trace()
 
     def forward(self, x, scope=None, factor=None):
         if (x[-1] is None):
@@ -96,3 +80,58 @@ class Net(nn.Module):
         x = F.relu(self.fc1(x))
         x = self.fc2(x)
         return x
+
+class Net(nn.Module):
+    """Multilayer perceptron"""
+    def __init__(self, x_dim, factor, scope=None):
+        super(Net, self).__init__()
+        self.fc_zip_1 = nn.Linear(x_dim, 10)
+        nn.init.kaiming_normal_(self.fc_zip_1.weight, mode='fan_in', a=1./3.)
+        nn.init.constant_(self.fc_zip_1.bias, 0.)
+
+        self.fc_zip_2 = nn.Linear(x_dim, 10)
+        nn.init.kaiming_normal_(self.fc_zip_2.weight, mode='fan_in', a=1./3.)
+        nn.init.constant_(self.fc_zip_2.bias, 0.)
+
+        self.fc_zip_3 = nn.Linear(2, 10)
+        nn.init.kaiming_normal_(self.fc_zip_3.weight, mode='fan_in', a=1./3.)
+        nn.init.constant_(self.fc_zip_3.bias, 0.)
+
+        self.linear = nn.Linear(10, 10)
+        nn.init.kaiming_normal_(self.linear.weight, mode='fan_in', a=1.)
+        nn.init.constant_(self.linear.bias, 0.)
+
+        self.fc_par_1 = nn.Linear(10, x_dim)
+        nn.init.kaiming_normal_(self.fc_par_1.weight, mode='fan_in', a=0.001)
+        nn.init.constant_(self.fc_par_1.bias, 0.)
+
+        self.scale_1 = nn.Parameter(torch.zeros((1, x_dim)))
+
+        self.fc_par_2 = nn.Linear(10, x_dim)
+        nn.init.kaiming_normal_(self.fc_par_2.weight, mode='fan_in', a=0.001)
+        nn.init.constant_(self.fc_par_2.bias, 0.)
+
+        self.fc_par_3 = nn.Linear(10, x_dim)
+        nn.init.kaiming_normal_(self.fc_par_3.weight, mode='fan_in', a=0.001)
+        nn.init.constant_(self.fc_par_3.bias, 0.)
+
+        self.scale_3 = nn.Parameter(torch.zeros((1, x_dim)))
+
+
+    def forward(self, x, scope=None, factor=None):
+        if (x[-1] is None):
+            x = x[:-1]
+
+        h1 = self.fc_zip_1(x[0])[None]
+        h2 = self.fc_zip_2(x[1])[None]
+        h3 = self.fc_zip_3(x[2])[None]
+
+        h_sum = torch.relu(torch.sum(torch.cat([h1, h2, h3], dim=0), dim=0))
+
+        h4 = torch.relu(self.linear(h_sum))
+
+        out1 = torch.exp(self.scale_1) * torch.tanh(self.fc_par_1(h4))
+        out2 = self.fc_par_2(h4)
+        out3 = torch.exp(self.scale_3) * torch.tanh(self.fc_par_3(h4))
+
+        return out1, out2, out3

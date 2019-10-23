@@ -19,7 +19,7 @@ class Gaussian(nn.Module):
         super(Gaussian, self).__init__()
         self.mu = mu.type(torchType)
         self.sigma = sigma.type(torchType)
-        self.i_sigma = torch.tensor(np.linalg.inv(sigma.cpu())).to(device).type(torchType)
+        self.i_sigma = torch.tensor(np.linalg.inv(sigma.cpu()), device=device, dtype=torchType)
 
     def get_energy_function(self):
         def fn(x, *args, **kwargs):
@@ -57,13 +57,13 @@ class GMM(nn.Module):
         self.constants = []
 
         for i, sigma in enumerate(sigmas):
-            self.i_sigmas.append(torch.tensor(np.linalg.inv(sigma).astype('float32')).to(device).type(torchType))
+            self.i_sigmas.append(torch.tensor(np.linalg.inv(sigma).astype('float32'), device=device, dtype=torchType))
             det = np.sqrt((2 * np.pi) ** self.k * np.linalg.det(sigma)).astype('float32')
-            self.constants.append(torch.tensor((pis[i] / det).astype('float32')).to(device).type(torchType))
+            self.constants.append(torch.tensor((pis[i] / det).astype('float32'), device=device, dtype=torchType))
 
-        self.mus = torch.tensor(mus).to(device).type(torchType)
-        self.sigmas = torch.tensor(sigmas).to(device).type(torchType)
-        self.pis = torch.tensor(pis).to(device).type(torchType)
+        self.mus = torch.tensor(mus, device=device, dtype=torchType)
+        self.sigmas = torch.tensor(sigmas, device=device, dtype=torchType)
+        self.pis = torch.tensor(pis, device=device, dtype=torchType)
 
     def get_energy_function(self):
         def fn(x):
@@ -75,11 +75,12 @@ class GMM(nn.Module):
             # print('Nans in x:', (x != x).sum())
             # print('V exp sum max', V.exp().sum(1).max())
             # print('V exp sum min', V.exp().sum(1).min())
-            out = V.exp().sum(dim=1)
-            out = -torch.log(out)
+            # out = V.exp().sum(dim=1)
+            # out = -torch.log(out)
             # print('Nans in get_energy_function: ', (out != out).sum())
             # print('Max get_energy_function:', out.max())
             # print('Min get_energy_function:', out.min())
+            out = -torch.logsumexp(V, dim=1)
             return out
         return fn
 
