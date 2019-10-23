@@ -202,8 +202,6 @@ class Dynamics(nn.Module):
                 out = out.data
         return out
 
-
-
     def _gen_mask(self, x):
         b = np.zeros(self.x_dim)
         for i in range(self.x_dim):
