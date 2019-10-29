@@ -53,7 +53,7 @@ def autocovariance_2(X, tau=0):
 
 def acl_spectrum(X, scale):
     n = X.shape[0]
-    return np.array([autocovariance_1(X / scale, tau=t) for t in range(n - 1)])
+    return np.array([autocovariance_2(X / scale, tau=t) for t in range(n - 1)])
 
 
 def ESS(A):

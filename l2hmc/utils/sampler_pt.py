@@ -4,10 +4,10 @@ import numpy as np
 import pdb
 
 torchType = torch.float32
-device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+# device = torch.device('cuda:1' if torch.cuda.is_available() else 'cpu')
 
 
-def propose(x, dynamics, init_v=None, aux=None, do_mh_step=False, log_jac=False, trainable=True, temperature=None):
+def propose(x, dynamics, init_v=None, aux=None, do_mh_step=False, log_jac=False, trainable=True, temperature=None, device='cpu'):
     if dynamics.hmc:
         Lx, Lv, px = dynamics.forward(x, init_v=init_v, aux=aux)
         return Lx, Lv, px, [tf_accept(x, Lx, px)]
@@ -36,17 +36,17 @@ def propose(x, dynamics, init_v=None, aux=None, do_mh_step=False, log_jac=False,
     outputs = []
 
     if do_mh_step:
-        outputs.append(tf_accept(x, Lx, px))
+        outputs.append(tf_accept(x, Lx, px, device))
 
     return Lx, Lv, px, outputs  # new coordinates, new momenta, new acceptance probability and outputs for coodinates,
     # taking MH acceptance in account
 
-def tf_accept(x, Lx, px):
+def tf_accept(x, Lx, px, device='cpu'):
     mask = (px - torch.tensor(np.random.rand(*list(px.shape)), device=device, dtype=torchType) >= 0.)[:, None]
     mask = torch.cat([mask, mask], dim=-1)
     return torch.where(mask, Lx, x).detach()
 
-def chain_operator(init_x, dynamics, nb_steps, aux=None, init_v=None, do_mh_step=False):
+def chain_operator(init_x, dynamics, nb_steps, aux=None, init_v=None, do_mh_step=False, device='cpu'):
     if not init_v:
         init_v = torch.tensor(np.random.randn(*list(init_x.shape)), device=device, dtype=torchType)
     final_x, final_v, log_jac, t = init_x, init_v, torch.zeros(init_x.shape[0]), torch.tensor(0.)

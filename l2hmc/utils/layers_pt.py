@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import numpy as np
 import pdb
 
-device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+# device = torch.device('cuda:1' if torch.cuda.is_available() else 'cpu')
 torchType = torch.float32
 
 class Dense(nn.Module):

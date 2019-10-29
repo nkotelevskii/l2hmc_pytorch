@@ -10,7 +10,7 @@ def safe_exp(x, name=None):
 
 torchType = torch.float32
 numpyType = np.float32
-device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+# device = torch.device('cuda:1' if torch.cuda.is_available() else 'cpu')
 
 
 class Dynamics(nn.Module):
@@ -25,13 +25,15 @@ class Dynamics(nn.Module):
                  hmc=False,
                  net_factory=None,
                  eps_trainable=True,
-                 use_temperature=False):
+                 use_temperature=False,
+                 device='cpu'):
         super(Dynamics, self).__init__()
+        self.device = device
         self.x_dim = x_dim  # dimensionality of input x
         self.use_temperature = use_temperature  # whether we use temperature or not
         self.temperature = torch.tensor(5.0, dtype=torchType, device=device)  # temperature value
         if not hmc:
-            self.alpha = nn.Parameter(torch.tensor(eps, dtype=torchType),
+            self.alpha = nn.Parameter(torch.tensor(eps, dtype=torchType, device=device),
                                     requires_grad=eps_trainable)
         else:
             self.alpha = torch.tensor(eps, dtype=torchType, device=device)
@@ -51,12 +53,17 @@ class Dynamics(nn.Module):
         self.T = T
         self._init_mask()
         self.T = torch.tensor(T, dtype=torchType, device=device)  # number of iteration for forward/backward procedure during training
+        if self.use_temperature:
+            self.Temp = torch.tensor(self.temperature, dtype=torchType, device=device)
+        else:
+            self.Temp = torch.tensor(1.0, dtype=torchType, device=device)
 
     def _init_mask(self):  # just set a half of components to zero, and a half to one
         # why it is necessarily to make these mask for all T at one time and to store all them?
         mask_per_step = []
+        device = self.device
         for t in range(self.T):
-            ind = np.random.permutation(np.arange(self.x_dim))[:int(self.x_dim / 2)]
+            ind = np.random.permutation(torch.arange(self.x_dim))[:int(self.x_dim / 2)]
             m = np.zeros((self.x_dim,))
             m[ind] = 1
             mask_per_step.append(m)
@@ -67,10 +74,10 @@ class Dynamics(nn.Module):
         return m, 1. - m
 
     def _format_time(self, t, tile=1):
-        trig_t = torch.tensor([
-            torch.cos(2 * np.pi * t / self.T),
-            torch.sin(2 * np.pi * t / self.T),
-        ], dtype=torchType, device=device)
+        trig_t = torch.cat([
+            torch.cos(2 * np.pi * t / self.T)[..., None],
+            torch.sin(2 * np.pi * t / self.T)[..., None],
+        ])
         out = trig_t[None].repeat(tile, 1)
         assert out.shape == (tile, 2), 'in _format_time'
         return out  # outputs tensor of size tile x 2
@@ -80,7 +87,6 @@ class Dynamics(nn.Module):
 
     def _forward_step(self, x, v, step, aux=None):
         # transformation which corresponds for d=+1
-
         # pdb.set_trace()
         eps = self.alpha
         t = self._format_time(step, tile=x.shape[0])  # time has size x.shape[0] x 2
@@ -177,21 +183,15 @@ class Dynamics(nn.Module):
         return x, v, torch.sum(sv1 + sv2 + mb * sx1 + m * sx2, dim=1)
 
     def energy(self, x, aux=None):
-        if self.use_temperature:
-            T = torch.tensor(self.temperature, dtype=torchType, device=device)
-        else:
-            T = torch.tensor(1.0, dtype=torchType, device=device)
-
         if aux is not None:
-            return self._fn(x, aux=aux) / T
+            return self._fn(x, aux=aux) / self.Temp
         else:
-            return self._fn(x) / T
+            return self._fn(x) / self.Temp
 
     def hamiltonian(self, x, v, aux=None):
         return self.energy(x, aux=aux) + self.kinetic(v)
 
     def grad_energy(self, x, aux=None):
-
         flag = x.requires_grad
         with torch.set_grad_enabled(True):
             if not flag:
@@ -214,6 +214,7 @@ class Dynamics(nn.Module):
 
     def forward(self, x, init_v=None, aux=None, log_path=False, log_jac=False):
         # this function repeats _step_forward T times
+        device = self.device
         if init_v is None:
             v = torch.tensor(np.random.randn(*list(x.shape)), dtype=torchType, device=device)
         else:
@@ -238,6 +239,7 @@ class Dynamics(nn.Module):
 
     def backward(self, x, init_v=None, aux=None, log_jac=False):
         # this function repeats _step_backward T times
+        device = self.device
         if init_v is None:
             v = torch.tensor(np.random.randn(*list(x.shape)), dtype=torchType, device=device)
         else:
@@ -261,11 +263,12 @@ class Dynamics(nn.Module):
         return x, v, self.p_accept(x_init, v_init, x, v, j, aux=aux)
 
     def p_accept(self, x0, v0, x1, v1, log_jac, aux=None):
+        device = self.device
         e_old = self.hamiltonian(x0, v0, aux=aux)
         e_new = self.hamiltonian(x1, v1, aux=aux)
 
         v = e_old - e_new + log_jac
-        other = torch.tensor(0.0, dtype=torchType, device=device)
+        other = torch.zeros_like(v)
         p = torch.exp(torch.min(v, other))
 
         return torch.where(torch.isfinite(p), p, torch.zeros_like(p))

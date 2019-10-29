@@ -5,7 +5,7 @@ import torch.nn as nn
 from scipy.stats import multivariate_normal, ortho_group
 
 torchType = torch.float32
-device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+# device = torch.device('cuda:1' if torch.cuda.is_available() else 'cpu')
 
 
 def quadratic_gaussian(x, mu, S):
@@ -15,8 +15,9 @@ def quadratic_gaussian(x, mu, S):
 
 
 class Gaussian(nn.Module):
-    def __init__(self, mu, sigma):
+    def __init__(self, mu, sigma, device='cpu'):
         super(Gaussian, self).__init__()
+        self.device = device
         self.mu = mu.type(torchType)
         self.sigma = sigma.type(torchType)
         self.i_sigma = torch.tensor(np.linalg.inv(sigma.cpu()), device=device, dtype=torchType)
@@ -40,11 +41,12 @@ class Gaussian(nn.Module):
 
 
 class GMM(nn.Module):
-    def __init__(self, mus, sigmas, pis):
+    def __init__(self, mus, sigmas, pis, device='cpu'):
         super(GMM, self).__init__()
         assert len(mus) == len(sigmas)
         assert sum(pis) == 1.0
 
+        self.device = device
         self.mus = mus
         self.sigmas = sigmas
         self.pis = pis

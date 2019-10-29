@@ -4,6 +4,7 @@ from sampler_pt import propose
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 from scipy.stats import multivariate_normal
+import torch
 
 
 def get_hmc_samples(x_dim, eps, energy_function, T=10, steps=200, samples=None):
@@ -13,11 +14,11 @@ def get_hmc_samples(x_dim, eps, energy_function, T=10, steps=200, samples=None):
 
     final_samples = []
 
-    for t in tqdm(range(steps)):
-        final_samples.append(samples.cpu().numpy())  # do we need .item() ?
-        _, _, _, samples = propose(samples, hmc_dynamics, do_mh_step=True)
-        samples = samples[0].detach()
-
+    with torch.no_grad():
+        for t in tqdm(range(steps)):
+            final_samples.append(samples.cpu().numpy())  # do we need .item() ?
+            _, _, _, samples = propose(samples, hmc_dynamics, do_mh_step=True)
+            samples = samples[0].detach()
     return np.array(final_samples)
 
 def plot_gaussian_contours(mus, covs, colors=['blue', 'red'], spacing=5,
