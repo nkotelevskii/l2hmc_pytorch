@@ -15,7 +15,7 @@ def get_hmc_samples(x_dim, eps, energy_function, T=10, steps=200, samples=None):
     final_samples = []
 
     with torch.no_grad():
-        for t in tqdm(range(steps)):
+        for _ in tqdm(range(steps)):
             final_samples.append(samples.cpu().numpy())  # do we need .item() ?
             _, _, _, samples = propose(samples, hmc_dynamics, do_mh_step=True)
             samples = samples[0].detach()

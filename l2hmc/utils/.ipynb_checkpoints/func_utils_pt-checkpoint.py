@@ -3,15 +3,14 @@ import numpy as np
 from scipy.stats import multivariate_normal
 
 
-
 def accept(x_i, x_p, p):
     assert x_i.shape == x_p.shape
 
     dN, dX = x_i.shape
 
-    u = torch.rand((dN,))
+    u = np.random.uniform(size=(dN,))
 
-    m = (p - u >= 0).type(torch.int32)[:, None]
+    m = (p - u >= 0).astype('int32')[:, None]
 
     return x_i * (1 - m) + x_p * m
 
@@ -50,9 +49,6 @@ def autocovariance_2(X, tau=0):
         s += np.sum((x1 - mean) * (x2 - mean)) / dN
 
     return s / (dT - tau)
-
-def jacobian(x, fx):
-    return torch.transpose(torch.unbind([torch.autograd.grad(component, x)[0][0] for component in torch.unbind(fx[0])]))
 
 
 def acl_spectrum(X, scale):
