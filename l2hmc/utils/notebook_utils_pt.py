@@ -7,8 +7,8 @@ from scipy.stats import multivariate_normal
 import torch
 
 
-def get_hmc_samples(x_dim, eps, energy_function, T=10, steps=200, samples=None):
-    hmc_dynamics = Dynamics(x_dim, energy_function, T=T, eps=eps, hmc=True)
+def get_hmc_samples(x_dim, eps, energy_function, T=10, steps=200, samples=None, device='cpu'):
+    hmc_dynamics = Dynamics(x_dim, energy_function, T=T, eps=eps, hmc=True, device=device)
     if samples is None:
         samples = gaussian.get_samples(n=200)
 
@@ -17,7 +17,7 @@ def get_hmc_samples(x_dim, eps, energy_function, T=10, steps=200, samples=None):
     with torch.no_grad():
         for _ in tqdm(range(steps)):
             final_samples.append(samples.cpu().numpy())  # do we need .item() ?
-            _, _, _, samples = propose(samples, hmc_dynamics, do_mh_step=True)
+            _, _, _, samples = propose(samples, hmc_dynamics, do_mh_step=True, device=device)
             samples = samples[0].detach()
     return np.array(final_samples)
 

@@ -10,7 +10,7 @@ def safe_exp(x, name=None):
 
 torchType = torch.float32
 numpyType = np.float32
-# device = torch.device('cuda:1' if torch.cuda.is_available() else 'cpu')
+# device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
 
 class Dynamics(nn.Module):
@@ -197,7 +197,7 @@ class Dynamics(nn.Module):
             if not flag:
                 x = x.data.requires_grad_(True)
             energy = self.energy(x, aux=aux)
-            out = torch.autograd.grad(energy.sum(), x, create_graph=True)[0]
+            out = torch.autograd.grad(energy.sum(), x)[0]
             if not flag:
                 out = out.data
         return out
@@ -212,20 +212,20 @@ class Dynamics(nn.Module):
 
         return b.astype(numpyType), nb.astype(numpyType)
 
-    def forward(self, x, init_v=None, aux=None, log_path=False, log_jac=False):
+    def forward(self, x, init_v=None, aux=None, log_path=False, log_jac=False, use_barker=False):
         # this function repeats _step_forward T times
         device = self.device
         if init_v is None:
             v = torch.tensor(np.random.randn(*list(x.shape)), dtype=torchType, device=device)
         else:
-            v = init_v
+            v = init_v.clone()
 
         dN = x.shape[0]
         t = torch.tensor(0., dtype=torchType, device=device)
         j = torch.zeros(dN, dtype=torchType, device=device)
 
-        x_init = x.data
-        v_init = v.data
+        x_init = x
+        v_init = v
 
         while t < self.T:
             x, v, log_j = self._forward_step(x, v, t, aux=aux)
@@ -235,22 +235,22 @@ class Dynamics(nn.Module):
         if log_jac:
             return x, v, j
 
-        return x, v, self.p_accept(x_init, v_init, x, v, j, aux=aux)
+        return x, v, self.p_accept(x_init, v_init, x, v, j, aux=aux, use_barker=use_barker), j
 
-    def backward(self, x, init_v=None, aux=None, log_jac=False):
+    def backward(self, x, init_v=None, aux=None, log_jac=False, use_barker=False):
         # this function repeats _step_backward T times
         device = self.device
         if init_v is None:
             v = torch.tensor(np.random.randn(*list(x.shape)), dtype=torchType, device=device)
         else:
-            v = init_v
+            v = init_v.clone()
 
         dN = x.shape[0]
         t = torch.tensor(0., dtype=torchType, device=device)
         j = torch.zeros(dN, dtype=torchType, device=device)
 
-        x_init = x.data #.clone() #.data
-        v_init = v.data #.clone() #.data
+        x_init = x #.clone() #.data
+        v_init = v #.clone() #.data
 
         while t < self.T:
             x, v, log_j = self._backward_step(x, v, self.T - t - 1, aux=aux)
@@ -260,15 +260,21 @@ class Dynamics(nn.Module):
         if log_jac:
             return x, v, j
 
-        return x, v, self.p_accept(x_init, v_init, x, v, j, aux=aux)
+        return x, v, self.p_accept(x_init, v_init, x, v, j, aux=aux, use_barker=use_barker), j
 
-    def p_accept(self, x0, v0, x1, v1, log_jac, aux=None):
+    def p_accept(self, x0, v0, x1, v1, log_jac, aux=None, use_barker=False):
         device = self.device
         e_old = self.hamiltonian(x0, v0, aux=aux)
         e_new = self.hamiltonian(x1, v1, aux=aux)
 
         v = e_old - e_new + log_jac
         other = torch.zeros_like(v)
-        p = torch.exp(torch.min(v, other))
+        if use_barker:
+            log_v = v
+            log_1_v = torch.logsumexp(torch.cat([torch.zeros_like(log_v).view(-1, 1),
+                                                 log_v.view(-1, 1)], dim=-1), dim=-1)
+            log_p = [log_v - log_1_v, log_1_v]
+        else:
+            log_p = torch.min(v, other)
 
-        return torch.where(torch.isfinite(p), p, torch.zeros_like(p))
+        return log_p

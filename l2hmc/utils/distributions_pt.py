@@ -5,7 +5,7 @@ import torch.nn as nn
 from scipy.stats import multivariate_normal, ortho_group
 
 torchType = torch.float32
-# device = torch.device('cuda:1' if torch.cuda.is_available() else 'cpu')
+# device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
 
 def quadratic_gaussian(x, mu, S):
@@ -27,6 +27,9 @@ class Gaussian(nn.Module):
             return quadratic_gaussian(x.type(torchType), self.mu, self.i_sigma)
 
         return fn
+
+    def get_logdensity(self, x):
+        return -self.get_energy_function()(x)
 
     def get_samples(self, n):
         '''
@@ -85,6 +88,9 @@ class GMM(nn.Module):
             out = -torch.logsumexp(V, dim=1)
             return out
         return fn
+
+    def get_logdensity(self, x):
+        return -self.get_energy_function()(x)
 
     def get_samples(self, n):
         categorical = np.random.choice(self.nb_mixtures, size=(n,), p=self.pis.cpu().detach().numpy())
