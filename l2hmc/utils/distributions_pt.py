@@ -3,7 +3,7 @@ import torch
 import numpy as np
 import torch.nn as nn
 from scipy.stats import multivariate_normal, ortho_group
-
+import pdb
 torchType = torch.float32
 # device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
@@ -20,27 +20,25 @@ class Gaussian(nn.Module):
         self.device = device
         self.mu = mu.type(torchType)
         self.sigma = sigma.type(torchType)
-        self.i_sigma = torch.tensor(np.linalg.inv(sigma.cpu()), device=device, dtype=torchType)
+        self.target_distr = torch.distributions.multivariate_normal.MultivariateNormal(loc=mu,
+                                                                                covariance_matrix=self.sigma)
 
     def get_energy_function(self):
-        def fn(x, *args, **kwargs):
-            return quadratic_gaussian(x.type(torchType), self.mu, self.i_sigma)
-
+        # def fn(x, *args, **kwargs):
+        #     return quadratic_gaussian(x.type(torchType), self.mu, self.i_sigma)
+        def fn(x):
+            return -self.target_distr.log_prob(x)
         return fn
-
-    def get_logdensity(self, x):
-        return -self.get_energy_function()(x)
 
     def get_samples(self, n):
         '''
         Sampling is broken in numpy for d > 10
         '''
-        C = np.linalg.cholesky(self.sigma.cpu())
-        X = np.random.randn(n, self.sigma.shape[0])
-        return X.dot(C.T)
+        return self.target_distr.sample((n, )).cpu().detach().numpy()
 
     def log_density(self, X):
-        return multivariate_normal(mean=self.mu, cov=self.sigma).logpdf(X)
+        # pdb.set_trace()
+        return self.target_distr.log_prob(X)
 
 
 class GMM(nn.Module):
@@ -49,67 +47,32 @@ class GMM(nn.Module):
         assert len(mus) == len(sigmas)
         assert sum(pis) == 1.0
 
-        self.device = device
-        self.mus = mus
-        self.sigmas = sigmas
-        self.pis = pis
-
-        self.nb_mixtures = len(pis)
-
-        self.k = mus[0].shape[0]
-
-        self.i_sigmas = []
-        self.constants = []
-
-        for i, sigma in enumerate(sigmas):
-            self.i_sigmas.append(torch.tensor(np.linalg.inv(sigma).astype('float32'), device=device, dtype=torchType))
-            det = np.sqrt((2 * np.pi) ** self.k * np.linalg.det(sigma)).astype('float32')
-            self.constants.append(torch.tensor((pis[i] / det).astype('float32'), device=device, dtype=torchType))
-
-        self.mus = torch.tensor(mus, device=device, dtype=torchType)
-        self.sigmas = torch.tensor(sigmas, device=device, dtype=torchType)
-        self.pis = torch.tensor(pis, device=device, dtype=torchType)
+        self.p = pis[0]  # probability of the first gaussian (1-p for the second)
+        self.log_pis = [torch.tensor(np.log(self.p), dtype=torch.float32, device=device),
+                        torch.tensor(np.log(1 - self.p), dtype=torch.float32,
+                                     device=device)]  # LOGS! probabilities of Gaussians
+        self.locs = mus  # list of locations for each of these gaussians
+        self.covs = sigmas  # list of covariance matrices for each of these gaussians
+        self.dists = [torch.distributions.MultivariateNormal(loc=self.locs[0], covariance_matrix=self.covs[0]),
+                      torch.distributions.MultivariateNormal(loc=self.locs[1], covariance_matrix=self.covs[
+                          1])]  # list of distributions for each of them
 
     def get_energy_function(self):
         def fn(x):
-            V = torch.cat([
-                (-quadratic_gaussian(x, self.mus[i], self.i_sigmas[i])
-                               + torch.log(self.constants[i])).unsqueeze(1)
-                for i in range(self.nb_mixtures)
-            ], dim=1)
-            # print('Nans in x:', (x != x).sum())
-            # print('V exp sum max', V.exp().sum(1).max())
-            # print('V exp sum min', V.exp().sum(1).min())
-            # out = V.exp().sum(dim=1)
-            # out = -torch.log(out)
-            # print('Nans in get_energy_function: ', (out != out).sum())
-            # print('Max get_energy_function:', out.max())
-            # print('Min get_energy_function:', out.min())
-            out = -torch.logsumexp(V, dim=1)
-            return out
+            return -self.log_density(x)
         return fn
 
-    def get_logdensity(self, x):
-        return -self.get_energy_function()(x)
-
     def get_samples(self, n):
-        categorical = np.random.choice(self.nb_mixtures, size=(n,), p=self.pis.cpu().detach().numpy())
-        counter_samples = collections.Counter(categorical)
-
-        samples = []
-
-        for k, v in counter_samples.items():
-            samples.append(np.random.multivariate_normal(self.mus[k].cpu().detach().numpy(),
-                                                         self.sigmas[k].cpu().detach().numpy(),
-                                                         size=(v,)))
-
-        samples = np.concatenate(samples, axis=0)
-
-        np.random.shuffle(samples)
-        # samples = torch.tensor(samples).to(device).type(torchType)
-
-        return samples
+        n_first = int(n * self.p)
+        n_second = n - n_first
+        samples_1 = self.dists[0].sample((n_first,))
+        samples_2 = self.dists[1].sample((n_second,))
+        samples = torch.cat([samples_1, samples_2])
+        return samples.cpu().detach().numpy()
 
     def log_density(self, X):
-        return np.log(sum([self.pis[i] * multivariate_normal(mean=self.mus[i], cov=self.sigmas[i]).pdf(X) for i in
-                           range(self.nb_mixtures)]))
+        log_p_1 = (self.log_pis[0] + self.dists[0].log_prob(X)).view(-1, 1)
+        log_p_2 = (self.log_pis[1] + self.dists[1].log_prob(X)).view(-1, 1)
+        log_p_1_2 = torch.cat([log_p_1, log_p_2], dim=-1)
+        log_density = torch.logsumexp(log_p_1_2, dim=1)  # + torch.tensor(1337., device=self.device)
+        return log_density

@@ -36,19 +36,20 @@ def propose(x, dynamics, init_v=None, aux=None, do_mh_step=False, return_log_jac
 
 
     outputs = []
-
+    directions = None
     if our_alg:
         if do_mh_step:
-            new_Lx, new_log_px, new_log_jac = tf_accept(x=x, Lx=Lx, log_px=log_px, device=device,
+            new_Lx, new_log_px, new_log_jac, directions = tf_accept(x=x, Lx=Lx, log_px=log_px, device=device,
                                                         our_alg=our_alg, use_barker=use_barker, log_jac=log_jac)
             log_jac = new_log_jac
             log_px = new_log_px
             outputs.append(new_Lx)
     else:
         if do_mh_step:
-            outputs.append(tf_accept(x=x, Lx=Lx, log_px=log_px, device=device, use_barker=use_barker))
+            new_Lx, directions = tf_accept(x=x, Lx=Lx, log_px=log_px, device=device, use_barker=use_barker)
+            outputs.append(new_Lx)
 
-    return Lx, Lv, log_px, outputs, log_jac  # new coordinates, new momenta, new acceptance probability, outputs for coodinates, log_jac
+    return Lx, Lv, log_px, outputs, log_jac, directions  # new coordinates, new momenta, new acceptance probability, outputs for coodinates, log_jac
     # taking MH acceptance in account
 
 def tf_accept(x, Lx, log_px, device='cpu', our_alg=False, use_barker=False, log_jac=None):
@@ -68,13 +69,17 @@ def tf_accept(x, Lx, log_px, device='cpu', our_alg=False, use_barker=False, log_
             new_log_px = torch.where(mask, log_px, torch.log(1. - log_px.exp()))
             new_log_jac = torch.where(mask, log_jac, torch.zeros_like(log_jac))
 
-        mask_cat = torch.cat([mask, mask], dim=-1)
-        new_Lx = torch.where(mask_cat, Lx, x)
-        return new_Lx, new_log_px, new_log_jac
+        new_Lx = torch.where(mask, Lx, x)
+        return new_Lx, new_log_px, new_log_jac, mask.squeeze()
     else:
-        logprobs = torch.log(torch.tensor(np.random.rand(*list(log_px.shape)), device=device, dtype=torchType))
-        mask = (logprobs <= log_px)[:, None]
-        return torch.where(mask, Lx, x).detach()
+        if use_barker:
+            logprobs = torch.log(torch.tensor(np.random.rand(*list(log_px[0].shape)), device=device,
+                                              dtype=torchType))
+            mask = (logprobs <= log_px[0])[:, None]
+        else:
+            logprobs = torch.log(torch.tensor(np.random.rand(*list(log_px.shape)), device=device, dtype=torchType))
+            mask = (logprobs <= log_px)[:, None]
+        return torch.where(mask, Lx, x).detach(), mask.squeeze()
 
 def chain_operator(init_x, dynamics, nb_steps, aux=None, init_v=None, do_mh_step=False, device='cpu'):
     if not init_v:
