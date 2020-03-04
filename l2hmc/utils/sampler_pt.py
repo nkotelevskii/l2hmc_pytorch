@@ -6,7 +6,8 @@ import pdb
 torchType = torch.float32
 
 
-def propose(x, dynamics, init_v=None, aux=None, do_mh_step=False, return_log_jac=False, temperature=None, device='cpu', our_alg=False, use_barker=False):
+def propose(x, dynamics, init_v=None, aux=None, do_mh_step=False, return_log_jac=False, temperature=None, device='cpu',
+            our_alg=False, use_barker=False):
     if dynamics.hmc:
         Lx, Lv, log_px, _ = dynamics.forward(x, init_v=init_v, aux=aux)
         return Lx, Lv, log_px, [tf_accept(x, Lx, log_px, device)]
@@ -39,10 +40,11 @@ def propose(x, dynamics, init_v=None, aux=None, do_mh_step=False, return_log_jac
     directions = None
     if our_alg:
         if do_mh_step:
-            new_Lx, new_log_px, new_log_jac, directions = tf_accept(x=x, Lx=Lx, log_px=log_px, device=device,
-                                                        our_alg=our_alg, use_barker=use_barker, log_jac=log_jac)
+            new_Lx, new_Lv, new_log_px, new_log_jac, directions = tf_accept(x=x, v=init_v, Lx=Lx, Lv=Lv, log_px=log_px,
+                                                device=device, our_alg=our_alg, use_barker=use_barker, log_jac=log_jac)
             log_jac = new_log_jac
             log_px = new_log_px
+            Lv = new_Lv
             outputs.append(new_Lx)
     else:
         if do_mh_step:
@@ -52,13 +54,13 @@ def propose(x, dynamics, init_v=None, aux=None, do_mh_step=False, return_log_jac
     return Lx, Lv, log_px, outputs, log_jac, directions  # new coordinates, new momenta, new acceptance probability, outputs for coodinates, log_jac
     # taking MH acceptance in account
 
-def tf_accept(x, Lx, log_px, device='cpu', our_alg=False, use_barker=False, log_jac=None):
+def tf_accept(x, Lx, log_px, device='cpu', our_alg=False, use_barker=False, log_jac=None, Lv=None, v=None):
     if our_alg:
         if use_barker:
             # pdb.set_trace()
             logprobs = torch.log(torch.tensor(np.random.rand(*list(log_px[0].shape)), device=device,
                                           dtype=torchType))
-            mask = logprobs <= log_px[0]
+            mask = (logprobs <= log_px[0])
             new_log_px = torch.where(mask, log_px[0], -log_px[1])
             new_log_jac = torch.where(mask, log_jac, torch.zeros_like(log_jac))
             mask = mask[:, None]
@@ -70,7 +72,8 @@ def tf_accept(x, Lx, log_px, device='cpu', our_alg=False, use_barker=False, log_
             new_log_jac = torch.where(mask, log_jac, torch.zeros_like(log_jac))
 
         new_Lx = torch.where(mask, Lx, x)
-        return new_Lx, new_log_px, new_log_jac, mask.squeeze()
+        new_Lv = torch.where(mask, Lv, v)
+        return new_Lx, new_Lv, new_log_px, new_log_jac, mask.squeeze()
     else:
         if use_barker:
             logprobs = torch.log(torch.tensor(np.random.rand(*list(log_px[0].shape)), device=device,
