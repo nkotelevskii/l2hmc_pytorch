@@ -195,11 +195,11 @@ class Dynamics(nn.Module):
         flag = x.requires_grad
         with torch.set_grad_enabled(True):
             if not flag:
-                x = x.data.requires_grad_(True)
+                x.requires_grad_(True)
             energy = self.energy(x, aux=aux)
             out = torch.autograd.grad(energy.sum(), x)[0]
             if not flag:
-                out = out.data
+                out = out.detach()
         return out
 
     def _gen_mask(self, x):
@@ -263,7 +263,6 @@ class Dynamics(nn.Module):
         return x, v, self.p_accept(x_init, v_init, x, v, j, aux=aux, use_barker=use_barker), j
 
     def p_accept(self, x0, v0, x1, v1, log_jac, aux=None, use_barker=False):
-        device = self.device
         e_old = self.hamiltonian(x0, v0, aux=aux)
         e_new = self.hamiltonian(x1, v1, aux=aux)
 
