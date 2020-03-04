@@ -212,7 +212,7 @@ class Dynamics(nn.Module):
 
         return b.astype(numpyType), nb.astype(numpyType)
 
-    def forward(self, x, init_v=None, aux=None, log_path=False, log_jac=False, use_barker=False):
+    def forward(self, x, init_v=None, aux=None, log_path=False, return_log_jac=False, use_barker=False):
         # this function repeats _step_forward T times
         device = self.device
         if init_v is None:
@@ -232,12 +232,12 @@ class Dynamics(nn.Module):
             j += log_j
             t += 1
 
-        if log_jac:
+        if return_log_jac:
             return x, v, j
 
         return x, v, self.p_accept(x_init, v_init, x, v, j, aux=aux, use_barker=use_barker), j
 
-    def backward(self, x, init_v=None, aux=None, log_jac=False, use_barker=False):
+    def backward(self, x, init_v=None, aux=None, return_log_jac=False, use_barker=False):
         # this function repeats _step_backward T times
         device = self.device
         if init_v is None:
@@ -257,7 +257,7 @@ class Dynamics(nn.Module):
             j += log_j
             t += 1
 
-        if log_jac:
+        if return_log_jac:
             return x, v, j
 
         return x, v, self.p_accept(x_init, v_init, x, v, j, aux=aux, use_barker=use_barker), j

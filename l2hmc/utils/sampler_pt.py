@@ -6,7 +6,7 @@ import pdb
 torchType = torch.float32
 
 
-def propose(x, dynamics, init_v=None, aux=None, do_mh_step=False, log_jac=False, temperature=None, device='cpu', our_alg=False, use_barker=False):
+def propose(x, dynamics, init_v=None, aux=None, do_mh_step=False, return_log_jac=False, temperature=None, device='cpu', our_alg=False, use_barker=False):
     if dynamics.hmc:
         Lx, Lv, log_px, _ = dynamics.forward(x, init_v=init_v, aux=aux)
         return Lx, Lv, log_px, [tf_accept(x, Lx, log_px, device)]
@@ -16,8 +16,8 @@ def propose(x, dynamics, init_v=None, aux=None, do_mh_step=False, log_jac=False,
             dynamics.temperature = temperature
         mask = (2 * torch.tensor(np.random.rand(x.shape[0], 1))).type(torch.int32).type(torchType).to(device)
         # pdb.set_trace()
-        Lx1, Lv1, log_px1, log_jac_f = dynamics.forward(x.clone(), init_v=init_v, aux=aux, log_jac=log_jac, use_barker=use_barker)
-        Lx2, Lv2, log_px2, log_jac_b = dynamics.backward(x.clone(), init_v=init_v, aux=aux, log_jac=log_jac, use_barker=use_barker)
+        Lx1, Lv1, log_px1, log_jac_f = dynamics.forward(x.clone(), init_v=init_v, aux=aux, return_log_jac=return_log_jac, use_barker=use_barker)
+        Lx2, Lv2, log_px2, log_jac_b = dynamics.backward(x.clone(), init_v=init_v, aux=aux, return_log_jac=return_log_jac, use_barker=use_barker)
 
     # orig  1 - orig
     #  0       1
