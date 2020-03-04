@@ -25,7 +25,7 @@ def propose(x, dynamics, init_v=None, aux=None, do_mh_step=False, log_jac=False,
     # pdb.set_trace()
     Lx = mask * Lx1 + (1 - mask) * Lx2  # by this we imitate the random choice of d (direction)
     Lv = mask * Lv1 + (1 - mask) * Lv2
-    log_jac = mask * log_jac_f + (1 - mask) * log_jac_b
+    log_jac = torch.squeeze(mask, dim=1) * log_jac_f + torch.squeeze((1 - mask), dim=1) * log_jac_b
 
     if use_barker:
         log_px = []
